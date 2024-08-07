@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <math.h>
+#include <time.h>
 
 #define ARR_LEN(x) sizeof(x)/sizeof(x[0])
 
@@ -33,6 +34,28 @@ float nn_tanh_prime(float x) {
     return (float) ((-4.f*expf(2*x))/((expf(2*x)+1)*(expf(2*x)+1)));
 }
 
+float leaky_ReLU(float x) {
+    if (x>0) {
+        return x;
+    }
+    return (float) 0.01*x;
+}
+
+float leaky_ReLU_prime(float x) {
+    if (x>0) {
+        return (float) 1;
+    }
+    return (float) 0.01;
+}
+
+float softplus(float x) {
+    return (float) logf(1+expf(x));
+}
+
+float softplus_prime(float x) {
+    return (float) (1/(1+expf(-x)));
+}
+
 // loss functions
 float mse(neuron_t neuron, train_data* data) {
     float res = 0;
@@ -43,7 +66,7 @@ float mse(neuron_t neuron, train_data* data) {
     return res;
 }
 
-float mse_prime(float x, float y) {
+float mse_prime(float x, float y, uint8_t n_samples) {
     float res = 0;
     /*
     for (size_t i=0;i<ARR_LEN(data);++i) {
@@ -52,7 +75,7 @@ float mse_prime(float x, float y) {
     res /= (float)ARR_LEN(data);
     */
     // TODO: work on proper implementation
-    res = 2*(x-y);
+    res = (2*(x-y));///(float)n_samples;
 
     return res;
 }
@@ -63,7 +86,6 @@ float rnd_float(void) {
     fclose(f);
     return (float) rand_byte / (float) 255;
 }
-
 
 void init_neuron(neuron_t* neuron, uint16_t n) {
     if ((neuron->w = (float*)malloc(n*sizeof(float))) == NULL) {
@@ -90,58 +112,53 @@ void init_layers(neuron_t** layer, uint16_t  n_neurons, uint16_t n_neurons_prev)
     return;
 }
 
-float* compute(neuron_t** nn, uint8_t n_layers, uint8_t* n_neurons, uint8_t n_last_layer, float (*activation)(float), float x) {
-    float* y = (float*)malloc(n_last_layer*sizeof(float));
+float** compute(neuron_t** nn, uint8_t n_layers, uint8_t* n_neurons, float (*activation)(float), float x) {
+    float** y = (float**)malloc(n_layers*sizeof(float*));
+    for (size_t i=0;i<n_layers;++i) {
+        y[i] = (float*)malloc(n_neurons[i]*sizeof(float));
+    }
+
     float a=x;
     float z = 0;
     for (size_t i=0;i<(n_layers-1);++i) {
         for (size_t j=0;j<n_neurons[i];++j) {
-            for (size_t k;k<nn[i][j].n_w;++k) {
+            for (size_t k=0;k<nn[i][j].n_w;++k) {
                 z += nn[i][j].w[k] * a;    
             }
             z += nn[i][j].b;
+            y[i][j] = (*activation)(z);
         }
         a = (*activation)(z);
+        z=0;
     }
     for (int i=0;i<n_neurons[n_layers-1];++i) {
         for (int j=0;j<nn[n_layers-1][i].n_w;++j) {
             z += nn[n_layers-1][i].w[j]*a;
         }
         z += nn[n_layers-1][i].b;
-        y[i] = (*activation)(z);
+        y[n_layers-1][i] = (*activation)(z);
     }
     return y;
 }
 
-void calc_del(neuron_t*** nn, uint8_t n_layers, uint8_t* n_neurons, float x, float y, float (*activation)(float), float (*activation_prime)(float), float (*loss_prime)(float, float)) {
-    float a = x;
-    float z;
+void learn(neuron_t*** nn, float** act_matrix, uint8_t n_layers, uint8_t* n_neurons, float (*act_inv)(float), float (*act_prime)(float), float (*l_prime)(float, float, uint8_t), float y) {
     float del_w = 0;
     float del_b = 0;
-
-    for (size_t i=0;i<n_layers;++i) {
-        for (size_t j=0;j<n_neurons[i];++j) {
-            z = 0;
-            for (size_t k=0;k<(*nn)[i][j].n_w;++k) {
-                z += (*nn)[i][j].w[k]*a;
+    float del_a = (*l_prime)((act_matrix[n_layers-1][n_neurons[n_layers-1]-1]), y, 1);
+    float a_prevk = 0;
+    float a_cur = 0;
+    for (size_t i=(n_layers-1);i!=-1;--i) {
+        for (size_t j=(n_neurons[i]-1);j!=-1;--j) {
+            for (size_t k=0;k<n_neurons[i];++k) {
+                a_prevk = act_matrix[i][k];
+                a_cur = act_matrix[i][j];
+                del_w = a_prevk*((*act_prime)(((*act_inv)(a_cur))))*del_a;
+                del_a *= (*nn)[i][j].w[k]*((*act_prime)(((*act_inv)(a_cur))));
+                printf("del_w:%f, del_a:%f\n", del_w, del_a);
             }
-            z += (*nn)[i][j].b;
-            float v = (*activation)(z);
-            del_w = a*((*activation_prime)(z))*((*loss_prime)(v, y));
-            del_b = 1*((*activation_prime)(z))*((*loss_prime)(v, y));
-            (*nn)[i][j].b += del_b;
-            for (size_t k=0;k<(*nn)[i][j].n_w;++k) {
-                (*nn)[i][j].w[k] += del_w;
-            }
-            a = (*activation)(z);
         }
-
     }
 
-    return;
-}
-
-void train(neuron_t** nn, uint8_t n_layers, uint8_t* n_neurons, size_t epochs, float (*loss)(float, float)) {
     return;
 }
 
@@ -157,7 +174,16 @@ int main(int argc, char** argv) {
         init_layers(&nn[i], 1, 1);
     }
 
-    printf("Computed y: %f\n", *compute(nn, n_layers, n_neurons, 1, &nn_tanh, 2.f));
+    // Tidy up main
+    float** act_m = compute(nn, n_layers, n_neurons, &nn_tanh, 2.f);
+    for (size_t i=0;i<n_layers;++i) {
+        printf("[");
+        for (size_t j=0;j<n_neurons[i];++j) {
+            printf("%f,", act_m[i][j]);
+        }
+        printf("]\n");
+    }
+    learn(&nn, act_m, n_layers, n_neurons, &nn_artanh, &nn_tanh_prime, &mse_prime, 4.f);
 
     for (size_t j=0;j<n_layers;++j) {
         for (size_t k=0;k<1;++k) {
