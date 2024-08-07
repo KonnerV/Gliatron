@@ -4,14 +4,8 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <math.h>
-#include <time.h>
 
 #define ARR_LEN(x) sizeof(x)/sizeof(x[0])
-
-typedef struct {
-    int x;
-    int y;
-} train_data;
 
 typedef struct {
     float b;
@@ -57,14 +51,14 @@ float softplus_prime(float x) {
 }
 
 // loss functions
-float mse(neuron_t neuron, train_data* data) {
+/*float mse(neuron_t neuron, train_data* data) {
     float res = 0;
     for (size_t i=0;i<ARR_LEN(data);++i) {
         res += ((data[i].x*neuron.w[0]-data[i].y)*(data[i].x*neuron.w[0]-data[i].y));
     }
     res /= (float) ARR_LEN(data);
     return res;
-}
+}*/
 
 float mse_prime(float x, float y, uint8_t n_samples) {
     float res = 0;
@@ -149,24 +143,21 @@ void learn(neuron_t*** nn, float** act_matrix, uint8_t n_layers, uint8_t* n_neur
     float a_cur = 0;
     for (int32_t i=(n_layers-1);i!=-1;--i) {
         del_a = 0;
-        printf("here1\n");
         for (int32_t j=(n_neurons[i]-1);j!=-1;--j) {
-            printf("sum\n");
             del_a += (*l_prime)((a_cur), y, 1);
         }
         for (int32_t j=(n_neurons[i]-1);j!=-1;--j) {
-            printf("here2\n");
             a_cur = act_matrix[i][j];
+            del_b = 1*((*act_prime)(((*act_inv)(a_cur))))*del_a;
                 for (int32_t k=0;k<n_neurons[i-1];++k) {
-                    printf("here3\n");
                     a_prev_layer = act_matrix[i-1][k];
                     del_w = a_prev_layer*((*act_prime)(((*act_inv)(a_cur))))*del_a;
-                    printf("del_w:%f, del_a:%f, a_prev: %f, a_cur: %f\n", del_w, del_a, a_prev_layer, a_cur);
+                    printf("del_w:%f, del_a:%f, del_b:%f, a_prev: %f, a_cur: %f\n", del_w, del_a, del_b, a_prev_layer, a_cur);
                 }
         }
     }
     del_w = x*((*act_prime)(((*act_inv)(a_cur))))*del_a;
-    printf("del_w of input: %f", del_w);
+    printf("del_w of input: %f, del_b of input: %f\n", del_w, del_b);
     return;
 }
 
@@ -179,7 +170,7 @@ int main(int argc, char** argv) {
         exit(-1);
     }
     int8_t n_neurons_prev = 0;
-    for (size_t i=0;i<n_layers;++i) {
+    for (int32_t i=0;i<n_layers;++i) {
         if ((i-1)<0) {
             n_neurons_prev = 1;
         } else {
