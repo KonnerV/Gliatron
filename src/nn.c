@@ -141,37 +141,51 @@ float** compute(neuron_t** nn, uint8_t n_layers, uint8_t* n_neurons, float (*act
     return y;
 }
 
-void learn(neuron_t*** nn, float** act_matrix, uint8_t n_layers, uint8_t* n_neurons, float (*act_inv)(float), float (*act_prime)(float), float (*l_prime)(float, float, uint8_t), float y) {
+void learn(neuron_t*** nn, float** act_matrix, uint8_t n_layers, uint8_t* n_neurons, float (*act_inv)(float), float (*act_prime)(float), float (*l_prime)(float, float, uint8_t), float x, float y) {
     float del_w = 0;
     float del_b = 0;
-    float del_a = (*l_prime)((act_matrix[n_layers-1][n_neurons[n_layers-1]-1]), y, 1);
-    float a_prevk = 0;
+    float del_a = 0;
+    float a_prev_layer = 0;
     float a_cur = 0;
-    for (size_t i=(n_layers-1);i!=-1;--i) {
-        for (size_t j=(n_neurons[i]-1);j!=-1;--j) {
-            for (size_t k=0;k<n_neurons[i];++k) {
-                a_prevk = act_matrix[i][k];
-                a_cur = act_matrix[i][j];
-                del_w = a_prevk*((*act_prime)(((*act_inv)(a_cur))))*del_a;
-                del_a *= (*nn)[i][j].w[k]*((*act_prime)(((*act_inv)(a_cur))));
-                printf("del_w:%f, del_a:%f\n", del_w, del_a);
-            }
+    for (int32_t i=(n_layers-1);i!=-1;--i) {
+        del_a = 0;
+        printf("here1\n");
+        for (int32_t j=(n_neurons[i]-1);j!=-1;--j) {
+            printf("sum\n");
+            del_a += (*l_prime)((a_cur), y, 1);
+        }
+        for (int32_t j=(n_neurons[i]-1);j!=-1;--j) {
+            printf("here2\n");
+            a_cur = act_matrix[i][j];
+                for (int32_t k=0;k<n_neurons[i-1];++k) {
+                    printf("here3\n");
+                    a_prev_layer = act_matrix[i-1][k];
+                    del_w = a_prev_layer*((*act_prime)(((*act_inv)(a_cur))))*del_a;
+                    printf("del_w:%f, del_a:%f, a_prev: %f, a_cur: %f\n", del_w, del_a, a_prev_layer, a_cur);
+                }
         }
     }
-
+    del_w = x*((*act_prime)(((*act_inv)(a_cur))))*del_a;
+    printf("del_w of input: %f", del_w);
     return;
 }
 
 int main(int argc, char** argv) {
     neuron_t** nn;
-    uint8_t n_layers = 2;
-    uint8_t n_neurons[2] = {1, 1};
-    if ((nn = (neuron_t**)malloc(2*sizeof(neuron_t))) == NULL) {
+    uint8_t n_layers = 3;
+    uint8_t n_neurons[3] = {1, 2, 1};
+    if ((nn = (neuron_t**)malloc(n_layers*sizeof(neuron_t*))) == NULL) {
         printf("Err alloc 1\n");
         exit(-1);
     }
+    int8_t n_neurons_prev = 0;
     for (size_t i=0;i<n_layers;++i) {
-        init_layers(&nn[i], 1, 1);
+        if ((i-1)<0) {
+            n_neurons_prev = 1;
+        } else {
+            n_neurons_prev = n_neurons[i-1];
+        }
+        init_layers(&nn[i], n_neurons[i], n_neurons_prev);
     }
 
     // Tidy up main
@@ -183,7 +197,7 @@ int main(int argc, char** argv) {
         }
         printf("]\n");
     }
-    learn(&nn, act_m, n_layers, n_neurons, &nn_artanh, &nn_tanh_prime, &mse_prime, 4.f);
+    learn(&nn, act_m, n_layers, n_neurons, &nn_artanh, &nn_tanh_prime, &mse_prime, 2.f, 4.f);
 
     for (size_t j=0;j<n_layers;++j) {
         for (size_t k=0;k<1;++k) {
