@@ -5,8 +5,6 @@
 #include <stddef.h>
 #include <math.h>
 
-#define ARR_LEN(x) sizeof(x)/sizeof(x[0])
-
 typedef struct {
     float b;
     float* w;
@@ -28,20 +26,6 @@ float nn_tanh_prime(float x) {
     return (float) ((-4.f*expf(2*x))/((expf(2*x)+1)*(expf(2*x)+1)));
 }
 
-float leaky_ReLU(float x) {
-    if (x>0) {
-        return x;
-    }
-    return (float) 0.01*x;
-}
-
-float leaky_ReLU_prime(float x) {
-    if (x>0) {
-        return (float) 1;
-    }
-    return (float) 0.01;
-}
-
 float softplus(float x) {
     return (float) logf(1+expf(x));
 }
@@ -50,26 +34,29 @@ float softplus_prime(float x) {
     return (float) (1/(1+expf(-x)));
 }
 
-// loss functions
-/*float mse(neuron_t neuron, train_data* data) {
-    float res = 0;
-    for (size_t i=0;i<ARR_LEN(data);++i) {
-        res += ((data[i].x*neuron.w[0]-data[i].y)*(data[i].x*neuron.w[0]-data[i].y));
-    }
-    res /= (float) ARR_LEN(data);
-    return res;
-}*/
+float softplus_inv(float x) {
+    return (float) logf(expf(x)-1);
+}
 
-float mse_prime(float x, float y, uint8_t n_samples) {
+// loss functions
+float mse(float predictions, float actual) {
     float res = 0;
-    /*
-    for (size_t i=0;i<ARR_LEN(data);++i) {
-        res += (((2*data[i].x*data[i].x)*neuron.w[0])-(2*data[i].x*data[i].y));
-    }
-    res /= (float)ARR_LEN(data);
-    */
-    // TODO: work on proper implementation
-    res = (2*(x-y));///(float)n_samples;
+    //for (size_t i=0;i<n_samples;++i) {
+    //    res += (actual[i]-predictions[i])*(actual[i]-predictions[i]);
+    //}
+    res = ((actual-predictions)*(actual-predictions));
+    //res /= (float) n_samples;
+    return res;
+}
+
+float mse_prime(float predictions, float actual) {
+    float res = 0;
+    //res += 2*(x-y);
+    //for (size_t i=0;i<n_samples;++i) {
+    //    res += 2*(x-y);
+    //}
+    //res /= (float)n_samples;
+    res = 2*(predictions-actual);//predictions-actual;
 
     return res;
 }
@@ -106,81 +93,98 @@ void init_layers(neuron_t** layer, uint16_t  n_neurons, uint16_t n_neurons_prev)
     return;
 }
 
-float** compute(neuron_t** nn, uint8_t n_layers, uint8_t* n_neurons, float (*activation)(float), float x) {
-    float** y = (float**)malloc(n_layers*sizeof(float*));
-    for (size_t i=0;i<n_layers;++i) {
-        y[i] = (float*)malloc(n_neurons[i]*sizeof(float));
+
+float** matrix_multiply(float** m1, float** m2, size_t m1_rows, size_t m1_cols, size_t m2_rows, size_t m2_cols) {
+    float** res = (float**)calloc(m1_rows, sizeof(float*));
+    for (size_t i=0;i<m1_cols;++i) {
+        res[i] = (float*)calloc(m2_cols, sizeof(float));
     }
 
-    float a=x;
-    float z = 0;
-    for (size_t i=0;i<(n_layers-1);++i) {
-        for (size_t j=0;j<n_neurons[i];++j) {
-            for (size_t k=0;k<nn[i][j].n_w;++k) {
-                z += nn[i][j].w[k] * a;    
+    for (size_t i=0;i<m1_rows;++i) {
+        for (size_t j=0;j<m2_cols;++j) {
+            for (size_t k=0;k<m2_rows;++k) {
+                res[i][j] += m1[i][k] * m2[k][j];
             }
-            z += nn[i][j].b;
-            y[i][j] = (*activation)(z);
         }
-        a = (*activation)(z);
-        z=0;
+
     }
-    for (int i=0;i<n_neurons[n_layers-1];++i) {
-        for (int j=0;j<nn[n_layers-1][i].n_w;++j) {
-            z += nn[n_layers-1][i].w[j]*a;
-        }
-        z += nn[n_layers-1][i].b;
-        y[n_layers-1][i] = (*activation)(z);
-    }
-    return y;
+    return res;
 }
 
-void learn(neuron_t*** nn, float** act_matrix, uint8_t n_layers, uint8_t* n_neurons, float (*act_inv)(float), float (*act_prime)(float), float (*l_prime)(float, float, uint8_t), float x, float y) {
-    float del_w = 0;
-    float del_b = 0;
-    float del_a = 0;
-    float a_prev_layer = 0;
-    float a_cur = 0;
-    for (int32_t i=(n_layers-1);i!=-1;--i) {
-        del_a = 0;
-        for (int32_t j=(n_neurons[i]-1);j!=-1;--j) {
-            del_a += (*l_prime)((a_cur), y, 1);
-        }
-        for (int32_t j=(n_neurons[i]-1);j!=-1;--j) {
-            a_cur = act_matrix[i][j];
-            del_b = 1*((*act_prime)(((*act_inv)(a_cur))))*del_a;
-                for (int32_t k=0;k<n_neurons[i-1];++k) {
-                    a_prev_layer = act_matrix[i-1][k];
-                    del_w = a_prev_layer*((*act_prime)(((*act_inv)(a_cur))))*del_a;
-                    printf("del_w:%f, del_a:%f, del_b:%f, a_prev: %f, a_cur: %f\n", del_w, del_a, del_b, a_prev_layer, a_cur);
-                }
+float** transpose_matrix(float** m, size_t n_rows, size_t n_cols) {
+    float** transposed = (float**)calloc(n_cols, sizeof(float*));
+    for (size_t i=0;i<n_cols;++i) {
+        transposed[i] = (float*)calloc(n_rows, sizeof(float));
+    }
+
+    for (int32_t i=(n_cols-1);i!=-1;--i) {
+        for (size_t j=0;j<n_rows;++j) {
+            transposed[i][j] = m[j][i];
         }
     }
-    del_w = x*((*act_prime)(((*act_inv)(a_cur))))*del_a;
-    printf("del_w of input: %f, del_b of input: %f\n", del_w, del_b);
-    return;
+    return transposed;
+}
+
+float** compute(size_t n_layers, uint8_t* n_neurons, float*** w_matrix, float** bias_matrix, float** input_matrix, size_t n_rows, size_t n_cols, float (*activation)(float)) {
+    float** res = (float**)malloc(n_layers*sizeof(float*));
+    for (size_t i=0;i<n_layers;++i) {
+        res[i] = (float*)calloc(n_neurons[i], sizeof(float));
+    }
+    // we may be able to determine n_neurons_prev within this function
+    float** coefficient_vec = input_matrix;
+    size_t n_neurons_prev = n_rows;
+
+    for (size_t i=0;i<n_layers;++i) {
+        res[i] = *matrix_multiply(w_matrix[i], coefficient_vec, n_neurons[i], n_neurons_prev, n_rows, n_cols);
+        for (size_t j=0;j<n_neurons[i];++j) {
+            res[i][j] += bias_matrix[i][j];
+            res[i][j] = (*activation)(res[i][j]);
+        }
+        coefficient_vec = &(res[i]);
+        n_neurons_prev = n_neurons[i];
+    }
+
+    return res;
 }
 
 int main(int argc, char** argv) {
     neuron_t** nn;
-    uint8_t n_layers = 3;
-    uint8_t n_neurons[3] = {1, 2, 1};
+    uint8_t n_layers = 5;
+    uint8_t n_neurons[5] = {1, 1, 1, 1, 1};
     if ((nn = (neuron_t**)malloc(n_layers*sizeof(neuron_t*))) == NULL) {
         printf("Err alloc 1\n");
         exit(-1);
     }
-    int8_t n_neurons_prev = 0;
-    for (int32_t i=0;i<n_layers;++i) {
-        if ((i-1)<0) {
-            n_neurons_prev = 1;
-        } else {
-            n_neurons_prev = n_neurons[i-1];
-        }
+    int8_t n_neurons_prev = 1;
+    for (size_t i=0;i<n_layers;++i) {
         init_layers(&nn[i], n_neurons[i], n_neurons_prev);
+        n_neurons_prev = n_neurons[i];
+    }
+    // TODO: Tidy up main
+    float*** w_m = (float***)malloc(n_layers*sizeof(float**));
+    float** b_m = (float**)malloc(n_layers*sizeof(float*));
+    for (size_t i=0;i<n_layers;++i) {
+        w_m[i] = (float**)malloc(n_neurons[i]*sizeof(float*));
+        b_m[i] = (float*)malloc(n_neurons[i]*sizeof(float));
+        for (size_t j=0;j<n_neurons[i];++j) {
+            w_m[i][j] = (float*)malloc(nn[i][j].n_w);
+        }
     }
 
-    // Tidy up main
-    float** act_m = compute(nn, n_layers, n_neurons, &nn_tanh, 2.f);
+    for (size_t i=0;i<n_layers;++i) {
+        for (size_t j=0;j<n_neurons[i];++j) {
+            for (size_t k=0;k<nn[i][j].n_w;++k) {
+                w_m[i][j][k] = nn[i][j].w[k];
+            }
+            b_m[i][j] = nn[i][j].b;
+        }
+    }
+
+
+    float* input_m[1] = {
+        (float[]) {2.f}
+    };
+    float** act_m = compute(n_layers, n_neurons, w_m, b_m, input_m, 1, 1, &softplus);
     for (size_t i=0;i<n_layers;++i) {
         printf("[");
         for (size_t j=0;j<n_neurons[i];++j) {
@@ -188,14 +192,27 @@ int main(int argc, char** argv) {
         }
         printf("]\n");
     }
-    learn(&nn, act_m, n_layers, n_neurons, &nn_artanh, &nn_tanh_prime, &mse_prime, 2.f, 4.f);
 
-    for (size_t j=0;j<n_layers;++j) {
-        for (size_t k=0;k<1;++k) {
-            free(nn[j][k].w);
+    for (size_t i=0;i<n_layers;++i) {
+        for (size_t j=0;j<n_neurons[i];++j) {
+            free(w_m[i][j]);
         }
-        free(nn[j]);
+        free(w_m[i]);
+        free(b_m[i]);
+    }
+    free(w_m);
+    free(b_m);
+
+    for (size_t i=0;i<n_layers;++i) {
+        for (size_t j=0;j<n_neurons[i];++j) {
+            free(nn[i][j].w);
+        }
+        free(nn[i]);
     }
     free(nn);
+    for (size_t i=0;i<n_layers;++i) {
+        free(act_m[i]);
+    }
+    free(act_m);
     return 0;
 }
