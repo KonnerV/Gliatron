@@ -3,22 +3,31 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <math.h>
+#include <time.h>
+#include <string.h>
 
 #include "gliatron.h"
 
 /// Maths
 // Activation functions
 double nn_tanh(double x) {
-    return (double) ((exp(2*x)-1)/(exp(2*x)+1));
+    if (x>340) {
+        x=340;
+    }
+    else if (x<-340) {
+        x=-340;
+    }
+    double y = ((exp(2*x)-1)/(exp(2*x)+1));
+    return y;
 }
 
 double nn_artanh(double x) {
     double eps = 1e-5;
-    if (x <= -1.f) {
-        x = -1.f+eps;
-    }
     if (x >= 1.f) {
         x = 1.f-eps;
+    }
+    else if (x <= -1.f) {
+        x = -1.f+eps;
     }
     return (double) (log(((x+1)/(1-x)))/2);
 }
@@ -88,7 +97,7 @@ double** transpose_matrix(double** m, size_t n_rows, size_t n_cols) {
 double** entrywise_product_matrix(double** m1, double** m2, size_t n_rows, size_t n_cols) {
     double** res = (double**)malloc(n_rows*sizeof(double*));
     for (size_t i=0;i<n_rows;++i) {
-        res[i] = (double*)malloc(n_cols*sizeof(float));
+        res[i] = (double*)malloc(n_cols*sizeof(double));
     }
     for (size_t i=0;i<n_rows;++i) {
         for (size_t j=0;j<n_cols;++j) {
@@ -100,10 +109,8 @@ double** entrywise_product_matrix(double** m1, double** m2, size_t n_rows, size_
 
 // Misc
 double rnd_float(void) {
-    FILE* f = fopen("/dev/random", "r");
-    uint8_t rand_byte = fgetc(f);
-    fclose(f);
-    return (double) rand_byte / (double) 255;
+    srand(time(NULL));
+    return rand()/((double)RAND_MAX)*2-1;
 }
 
 // Init
@@ -132,16 +139,24 @@ void init_layers(neuron_t** layer, uint16_t  n_neurons, uint16_t n_neurons_prev)
 
 // NN algos
 double** compute(size_t n_layers, uint8_t* n_neurons, double*** w_matrix, double** bias_matrix, double** x_matrix, size_t n_rows, size_t n_cols, double (*activation)(double)) {
-    double** res = (double**)malloc(n_layers*sizeof(double*));
-    for (size_t i=0;i<n_layers;++i) {
-        res[i] = (double*)calloc(n_neurons[i], sizeof(double));
+    double** res = (double**)calloc(n_layers, sizeof(double*));
+    double** coefficient_vec = malloc(n_rows*sizeof(double*));
+    for (size_t i=0;i<n_rows;++i) {
+        coefficient_vec[i] = malloc(1*sizeof(double));
     }
+    memcpy(&coefficient_vec[0][0], &x_matrix[0][0], n_rows*1*sizeof(double));
 
-    double** coefficient_vec = x_matrix;
+    double** aux;
     size_t n_neurons_prev = n_rows;
 
     for (size_t i=0;i<n_layers;++i) {
-        coefficient_vec = matrix_dotproduct(w_matrix[i], coefficient_vec, n_neurons[i], n_neurons_prev, n_neurons_prev, 1);
+        aux = coefficient_vec;
+        coefficient_vec = matrix_dotproduct(w_matrix[i], aux, n_neurons[i], n_neurons_prev, n_neurons_prev, 1);
+        for (size_t j=0;j<n_neurons_prev;++j) {
+            free(aux[j]);
+        }
+        free(aux);
+
         res[i] = vecmatrix_to_array(coefficient_vec, n_neurons[i], 1);
         for (size_t j=0;j<n_neurons[i];++j) {
             res[i][j] += bias_matrix[i][j];
@@ -149,24 +164,30 @@ double** compute(size_t n_layers, uint8_t* n_neurons, double*** w_matrix, double
         }
         n_neurons_prev = n_neurons[i];
     }
-
+    for (size_t i=0;i<n_neurons_prev;++i) {
+        free(coefficient_vec[i]);
+    }
+    free(coefficient_vec);
     return res;
 }
 
-void grad_desc(neuron_t*** nn, double*** w_m, double** b_m, double** act_m, uint8_t n_layers, uint8_t* n_neurons, double (*act_inv)(double), double (*act_prime)(double), double** x, size_t x_rows, double** y, double lr) {
+void grad_desc(neuron_t*** nn, double*** w_m, double** b_m, double** act_m, uint8_t n_layers, uint8_t* n_neurons, double (*act_inv)(double), double (*act_prime)(double), double** x, size_t x_rows, double** y, double lr, size_t n_samples) {
     double** delta;
     double** delta_new;
-    double** act_prime_m = array_to_vecmatrix(act_m[n_layers-1], n_neurons[n_layers-1]);
+    double** x_transposed;
+    double** w_transposed;
+    double** act_prime_m;
+    double** act_vec;
+    double** act_vec_transposed;
+    act_prime_m = array_to_vecmatrix(act_m[n_layers-1], n_neurons[n_layers-1]);
     double** grad_l = array_to_vecmatrix(act_m[n_layers-1], n_neurons[n_layers-1]);
     for (size_t i=0;i<n_neurons[n_layers-1];++i) {
         grad_l[i][0] -= y[i][0];
-        act_prime_m[i][0] = (*act_prime)((*act_inv)(act_prime_m[i][0]));
+        act_prime_m[i][0] = (*act_prime)((*act_inv)(act_m[i][0]));
     }
 
     double** del_w;
-
     delta = entrywise_product_matrix(grad_l, act_prime_m, n_neurons[n_layers-1], 1);
-
     for (size_t i=0;i<n_neurons[n_layers-1];++i) {
         free(act_prime_m[i]);
         free(grad_l[i]);
@@ -177,7 +198,13 @@ void grad_desc(neuron_t*** nn, double*** w_m, double** b_m, double** act_m, uint
     for (int32_t i=(n_layers-1);i!=-1;--i) {
         switch (i==0) {
             case 1: {
-                del_w = matrix_dotproduct(delta, transpose_matrix(x, x_rows, 1), n_neurons[i], 1, 1, x_rows);
+                x_transposed = transpose_matrix(x, x_rows, 1);
+                del_w = matrix_dotproduct(delta, x_transposed, n_neurons[i], 1, 1, x_rows);
+                
+                for (size_t j=0;j<x_rows;++j) {
+                    free(x_transposed[j]);
+                }
+                free(x_transposed);
                 for (size_t j=0;j<n_neurons[i];++j) {
                     for (size_t k=0;k<x_rows;++k) {
                         (*nn)[i][j].w[k] += del_w[j][k]*lr;
@@ -196,9 +223,19 @@ void grad_desc(neuron_t*** nn, double*** w_m, double** b_m, double** act_m, uint
                 break;
             }
             default: {
-                del_w = matrix_dotproduct(delta, transpose_matrix(array_to_vecmatrix(act_m[i-1], n_neurons[i]), n_neurons[i], 1), n_neurons[i], 1, 1, n_neurons[i]);
+                act_vec = array_to_vecmatrix(act_m[i-1], n_neurons[i-1]);
+                act_vec_transposed = transpose_matrix(act_vec, n_neurons[i-1], 1);
+                del_w = matrix_dotproduct(delta, act_vec_transposed, n_neurons[i], 1, 1, n_neurons[i-1]);
+
+                for (size_t j=0;j<n_neurons[i-1];++j) {
+                    free(act_vec[j]);
+                }
+                free(act_vec_transposed[0]);
+                free(act_vec_transposed);
+                free(act_vec);
+
                 for (size_t j=0;j<n_neurons[i];++j) {
-                    for (size_t k=0;k<n_neurons[i];++k) {
+                    for (size_t k=0;k<n_neurons[i-1];++k) {
                         (*nn)[i][j].w[k] += del_w[j][k]*lr;
                     }
                     free(del_w[j]);
@@ -209,8 +246,14 @@ void grad_desc(neuron_t*** nn, double*** w_m, double** b_m, double** act_m, uint
                     (*nn)[i][j].b += delta[j][0]*lr;
                 }
 
-                delta_new = (matrix_dotproduct(transpose_matrix(w_m[i], n_neurons[i], n_neurons[i-1]), delta, n_neurons[i-1], n_neurons[i], n_neurons[i], 1));
-                // freeing the old delta after it's use
+                w_transposed = transpose_matrix(w_m[i], n_neurons[i], n_neurons[i-1]);
+                delta_new = (matrix_dotproduct(w_transposed, delta, n_neurons[i-1], n_neurons[i], n_neurons[i], 1));
+
+                for (size_t j=0;j<n_neurons[i-1];++j) {
+                    free(w_transposed[j]);
+                }
+                free(w_transposed);
+
                 for (size_t j=0;j<n_neurons[i];++j) {
                     free(delta[j]);
                 }
@@ -222,7 +265,6 @@ void grad_desc(neuron_t*** nn, double*** w_m, double** b_m, double** act_m, uint
                 }
                 delta = entrywise_product_matrix(delta_new, act_prime_m, n_neurons[i-1], 1);
 
-                // freeing "new_delta" so we can create the delta for the previous layer && freeing the activation prime matrix as we no longer need it
                 for (size_t j=0;j<n_neurons[i-1];++j) {
                     free(act_prime_m[j]);
                     free(delta_new[j]);
