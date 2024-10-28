@@ -11,11 +11,11 @@
 /// Maths
 // Activation functions
 double nn_tanh(double x) {
-    if (x>340) {
-        x=340;
+    if (x > 340) {
+        x = 340;
     }
-    else if (x<-340) {
-        x=-340;
+    else if (x < -340) {
+        x = -340;
     }
     double y = ((exp(2*x)-1)/(exp(2*x)+1));
     return y;
@@ -108,33 +108,34 @@ double** entrywise_product_matrix(double** m1, double** m2, size_t n_rows, size_
 }
 
 // Misc
-double rnd_float(void) {
+double rnd_double(void) {
     srand(time(NULL));
-    return rand()/((double)RAND_MAX)*2-1;
+    return (rand()/((double)RAND_MAX))*2-1;
 }
 
 // Init
-void init_neuron(neuron_t* neuron, uint16_t n) {
+int8_t init_neuron(neuron_t* neuron, uint16_t n) {
     if ((neuron->w = (double*)malloc(n*sizeof(double))) == NULL) {
-        exit(-1);
+        return -1;
     }
     for (size_t i=0;i<n;++i) {
-        neuron->w[i] = rnd_float();
+        neuron->w[i] = rnd_double();
     }
-    neuron->b = rnd_float();
+    neuron->b = rnd_double();
     neuron->n_w = n;
-    return;
+    return 0;
 }
 
-void init_layers(neuron_t** layer, uint16_t  n_neurons, uint16_t n_neurons_prev) {
+int8_t init_layers(neuron_t** layer, uint16_t  n_neurons, uint16_t n_neurons_prev) {
     if (((*layer) = (neuron_t*)malloc(n_neurons*sizeof(neuron_t))) == NULL) {
-        printf("Err alloc 2\n");
-        exit(-1);
+        return -1;
     }
     for (size_t i=0;i<n_neurons;++i) {
-        init_neuron(&((*layer)[i]), n_neurons_prev);
+        if (init_neuron(&((*layer)[i]), n_neurons_prev) < 0) {
+            return -1;
+        }
     }
-    return;
+    return 0;
 }
 
 // NN algos
@@ -171,7 +172,7 @@ double** compute(size_t n_layers, uint8_t* n_neurons, double*** w_matrix, double
     return res;
 }
 
-void grad_desc(neuron_t*** nn, double*** w_m, double** b_m, double** act_m, uint8_t n_layers, uint8_t* n_neurons, double (*act_inv)(double), double (*act_prime)(double), double** x, size_t x_rows, double** y, double lr, size_t n_samples) {
+void grad_desc(neuron_t*** nn, double*** w_m, double** act_m, uint8_t n_layers, uint8_t* n_neurons, double (*act_inv)(double), double (*act_prime)(double), double** x, size_t x_rows, double** y, double lr) {
     double** delta;
     double** delta_new;
     double** x_transposed;
